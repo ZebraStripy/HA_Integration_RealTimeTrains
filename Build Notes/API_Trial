@@ -1,0 +1,19 @@
+###################################################################
+# Example commands to explore and test the RealTimeTrains API.
+###################################################################
+
+TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYjIwYmFmOC0zZTk5LTQxODMtODYwZS0zYTYzNDdiMjVmNWUiLCJpc3MiOiJodHRwczovL2FwaS1wb3J0YWwucnR0LmlvIn0.u4E2VRw12kF4SwptiTIizB8jjRYfE_Ze2SX9t7bG8ro
+ACCESS=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2RhdGEucnR0LmlvIiwicnR0LmlzcyI6Imh0dHBzOi8vYXBpLXBvcnRhbC5ydHQuaW8iLCJzdWIiOiJiYjIwYmFmOC0zZTk5LTQxODMtODYwZS0zYTYzNDdiMjVmNWUiLCJpYXQiOjE3OTA1NDA4OTksImV4cCI6MTc5MDU0MjA5OSwic2hvdWxkUmV0dXJuSGlzdG9yeSI6dHJ1ZSwicmVzdHJpY3RIaXN0b3J5RGF5cyI6MTQsInJlc3RyaWN0TmFtZXNwYWNlcyI6dHJ1ZSwicGVybWl0dGVkTmFtZXNwYWNlcyI6WyJnYi1uciJdLCJlbnRpdGxlbWVudHMiOltdLCJyYXRlTGltaXRzIjp7Im1pbnV0ZSI6MTAsImhvdXIiOjEwMCwiZGF5IjoxMDAwLCJ3ZWVrIjoxMDAwMH19.jMKMolU0OXr492l-LX83NlWS8FROUpgRE76B7gFK3hw
+
+# Get an access token - past into ACCESS variable above to use following commands.
+# curl -H "Authorization: Bearer $TOKEN" https://data.rtt.io/api/get_access_token
+
+# General info.
+# curl -H "Authorization: Bearer $ACCESS" https://data.rtt.io/api/info
+
+# Services from Chippenham.
+# curl -H "Authorization: Bearer $ACCESS" -H 'accept: application/json' 'https://data.rtt.io/rtt/location?code=gb-nr%3ACPM&timeFrom=2026-09-27T21%3A00%3A00&timeWindow=120&timeTolerance=false&detailed=true' 
+
+# Details on a specific service. Set "uniqueIdentity" to a value in the previous call.
+# curl -H "Authorization: Bearer $ACCESS" -H 'accept: application/json' 'https://data.rtt.io/rtt/service?uniqueIdentity=gb-nr%3AC48848%3A2026-09-27'
+  

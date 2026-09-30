@@ -1,0 +1,1671 @@
+openapi: 3.1.1
+info:
+  title: Realtime Trains API
+  version: "2.0"
+  description: |
+    This API interrogates the Realtime Trains service for information about train services operating within Great Britain.
+
+    [GitHub Repository and Contributing/Change Requests can be made here.](https://github.com/realtimetrains/api-specification)
+
+    # Authentication 
+
+    Authentication is made through a bearer token. You may *either* have:
+    
+    * solely an access token which grants you a long-life entitlement to the system or,
+    * long-life refresh token which you will need to request a short-life access token with.
+
+    API authentication is performed through a *Bearer* token authentication. You may either hold a long-life refresh or access token. When you are provided with the key, it will be made clear what you hold.
+
+    **It is a requirement that no token is placed in a distributable user application unless specifically authorised by us.** End-user applications are expected to proxy their requests through a server-side application such that token is not available publicly. If we identify a token is in a downstream user application, it **will** be revoked.
+
+    If you have a refresh token, you will need to periodically request an access token. You can do this through the `/api/get_access_token` endpoint. This will issue you an access token that is valid until the time defined in `validUntil`. It will also tell you your entitlements.
+
+    ### Understanding your entitlements
+    
+    An access token does not grant access to all functionality of the API. Entitlements can restrict access to namespaces and/or functionality, such as access to detailed information or Know Your Train data.
+
+    When you have a valid access token, your entitlements can be found through the `/api/info` endpoint. 
+
+    ### Getting an access token
+
+    You can sign up to the next-generation API at https://api-portal.rtt.io. It requires a RTT unified login account.
+
+    # API Versioning
+
+    You can find the current version of the API you are using through /api/info. The API accepts a Version header. You can guarantee the selection of the API version by using the Version header. You will otherwise always be provided the latest copy.
+
+    # Rate Limiting
+
+    All API responses include rate limit headers to help you manage your usage. Headers are suffixed with a dimension: `Minute`, `Hour`, `Day` or `Week`. The following headers are returned:
+
+    * `X-RateLimit-Limit-<dimension>` â€” the maximum number of requests permitted in the given dimension
+    * `X-RateLimit-Remaining-<dimension>` â€” the number of requests remaining in the given dimension
+
+    For example, `X-RateLimit-Limit-Hour` and `X-RateLimit-Remaining-Hour`.
+
+    If you exceed your rate limit, a `429 Too Many Requests` response will be returned with a `Retry-After` header indicating the number of seconds until you can retry.
+
+    # Available Entitlements
+
+    The below section includes a list of most available entitlements within the API. Not all entitlements are available to all users. Some entitlements are retained for RTT use only and are not detailed here. 
+
+    * `allowDetailed` - enables detailed mode
+    * `allowAllocations` - allows access to all allocations on train service and location line up searches
+    * `allowAllocationsPassenger` - as above, except restricted to train operators only available via Gemini
+    * `allowAllocationComponents` - includes individual vehicle components of allocation data such as vehicle numbers 
+    * `allowFullAllocationListing` - entitles access to the allocations by service/class endpoints. This may be restricted by train operator.
+    * `allowFullAllocationListingPassenger` - as above, except restricted to train operators only available via Gemini 
+    * `allowFreightAllocations` - requires allowAllocations, additionally provides allocations for freight trains 
+    * `allowFreightAllocationComponents` - like `allowAllocationComponents`, provides individual vehicle data. 
+    * `showEstimateTimeIfNoReport` - feature flag, RTT will compute an estimated time in 'No report' scenarios where possible and train still considered en-route.
+
+    Some entitlements, particularly allocations if not open data, require consent from the train operator with which data is being required.
+
+
+  contact:
+    email: hello@realtimetrains.com
+    url: http://www.realtimetrains.co.uk
+    name: Realtime Trains
+  summary: |
+    This is the next generation of the Realtime Trains API, as currently implemented.
+
+  termsOfService: https://www.realtimetrains.co.uk/legal/
+
+servers:
+  - url: https://data.rtt.io
+    description: Primary RTT API server
+  
+
+tags:
+  - name: generic
+    description: |
+      Is the primary entry point for generic outputs relating to service data, including forward looking schedule and historical outputs. 
+
+      Endpoints and outputs may be restricted by authorisation token.
+  - name: network-rail
+    description: |
+      Network Rail specific endpoints for service data. 
+
+      Endpoints and outputs may be restricted by authorisation token.
+  - name: referenceData
+    description: |
+      Contains all referential data required for finding services.
+  - name: api
+    description: |
+      Contains state for API usage and operation
+
+components:
+  securitySchemes:
+    BearerToken:
+      type: http
+      scheme: bearer
+
+  parameters:
+    VersionHeader:
+      in: header
+      name: Version
+      schema:
+        type: string
+        format: date
+      required: false
+      description: |
+        The API version to use, in ISO 8601 date format (e.g. "2025-10-25"). If not provided, the latest version will be used.
+
+        If both the header and query parameter are specified, the header takes priority.
+      example: "2025-10-25"
+    VersionQuery:
+      in: query
+      name: version
+      schema:
+        type: string
+        format: date
+      required: false
+      description: |
+        The API version to use, in ISO 8601 date format (e.g. "2025-10-25"). If not provided, the latest version will be used.
+
+        If both the header and query parameter are specified, the header takes priority.
+      example: "2025-10-25"
+
+  schemas:
+    SystemStatus:
+      type: object 
+      properties:
+        realtimeNetworkRail:
+          type: string
+          enum:
+            - "OK"
+            - "REALTIME_DATA_LIMITED"
+            - "REALTIME_DATA_NONE"
+          default: "OK"
+          description: |
+            Shows the current status of the real-time data ingress in the Network Rail ingesters 
+        rttCore:
+          type: string 
+          enum:
+            - "OK"
+            - "REALTIME_DEGRADED"
+            - "SCHEDULE_ONLY"
+          default: "OK"
+          description: |
+            Shows the current state of the RTT core and reflects the state of the responses being provided within this query
+
+    GeographicLocation:
+      type: object 
+      properties:
+        namespace:
+          type: string 
+          description: Namespace of the location
+          default: gb-nr 
+        description:
+          type: string 
+          description: Long text description of the location
+          example: Clapham Junction 
+        shortCodes:
+          type: array
+          items:
+            type: string 
+            example: CLJ 
+        longCodes:
+          type: array 
+          items:
+            type: string 
+            example: CLPHMJN
+          example:
+            - CLPHMJN
+            - CLPHMJ2
+            - CLPHMJM
+            - CLPHMJW
+            - CLPHMJC
+
+    StandardisedDateTime:
+      type: string 
+      format: date-time
+      description: ISO 8601 / RFC3339 datetime (e.g. "2025-10-25T13:45:00Z"; UTC or with offset allowed)
+
+    LocationCallType:
+      oneOf:
+        - type: string 
+        - type: 'null'
+      description: Describes the nature of the location call type, if null then no call/stop is planned 
+      enum:
+        - OPERATIONAL_ONLY
+        - ADVERTISED_OPEN
+        - ADVERTISED_SET_DOWN
+        - ADVERTISED_PICK_UP
+      example: ADVERTISED_OPEN
+
+    LocationDisplayAs:
+      oneOf:
+        - type: string 
+        - type: 'null'
+      description: | 
+        Defines the display type for this location. The defined are as follows:
+
+        * **CALL**: train stops at location, specific nature defined in other fields. Includes scheduled origin & destination if unaltered. 
+        * **CANCELLED**: train no longer stops at/passes this location, if it was previously a call it is undefined whether the train will no longer pass through (i.e. whether it is a Not to Stop order, or the train has been altered in such a way that it will not go through this location.) 
+        * **DIVERTED**: train has been diverted away from this route and will no longer pass through or call at this location.
+        * **STARTS**: train now starts from this location (altered to do so.)
+        * **TERMINATES**: train now terminates at this location (altered to do so.)
+        * **PASS**: train passes this location 
+
+        If this field is null, then this should be considered as a PASS.
+      enum:
+        - CALL 
+        - CANCELLED
+        - DIVERTED
+        - STARTS 
+        - TERMINATES
+        - PASS 
+
+    LocationStatus:
+      oneOf:
+        - type: string 
+        - type: 'null'
+      description: | 
+        Defines the location "status" of this location. They are defined as follows:
+
+        * **APPROACHING**: train is approaching the location
+        * **ARRIVING**: train is arriving at the platform
+        * **AT_PLATFORM**: train is stopped at the platform
+        * **DEPART_PREPARING**: train is preparing to depart 
+        * **DEPART_READY**: train is ready to depart (typically signal is "off")
+        * **DEPARTING**: train is leaving the Platform
+
+        Not all train services in all locations and/or systems will support all of the above values.
+      enum:
+        - APPROACHING 
+        - ARRIVING
+        - AT_PLATFORM
+        - DEPART_PREPARING 
+        - DEPART_READY
+        - DEPARTING
+
+    IndividualTemporalData:
+      type: object 
+      properties:
+        scheduleInternal:
+          $ref: '#/components/schemas/StandardisedDateTime'
+          description: Where available, contains the internal time for this activity. In Network Rail, this is the WTT time.
+        scheduleAdvertised:
+          $ref: '#/components/schemas/StandardisedDateTime'
+          description: Where available, contains the advertised time for this activity. In Network Rail, this is the GBTT time.
+        realtimeForecast:
+          $ref: '#/components/schemas/StandardisedDateTime'
+          description: If populated, contains the forecasted time for this activity.
+        realtimeEstimate:
+          $ref: '#/components/schemas/StandardisedDateTime'
+          description: | 
+            If populated, shows an estimated time for this activity if the service has otherwise not reported at this location.
+
+            This is different to the `realtimeForecast` field, in that it will only be populated if the train has no reported at this location. 
+
+            This field will only be populated if you have the correct entitlement on your token.
+        realtimeNoReport:
+          type: boolean
+          description: If populated true, this service has not reported at this activity.
+          example: false
+        realtimeActual:
+          $ref: '#/components/schemas/StandardisedDateTime'
+          description: If populated, contains the actual time for this activity.
+        realtimeInternalLateness:
+          type: integer 
+          description: Lateness in minutes, *this field will be null if realtimeActual or scheduleInternal is not populated*
+          example: 5
+        realtimeAdvertisedLateness:
+          type: integer 
+          description: Lateness in minutes, *this field will be null if realtimeActual or scheduleAdvertised is not populated*
+        isCancelled: 
+          type: boolean
+          description: Identifies if this temporal element is cancelled
+        cancellationReasonCode:
+          type: string 
+          description: Provides a reason code for the cancellation reason 
+
+        
+    LocationTemporalData:
+      type: object 
+      properties:
+        arrival:
+          $ref: '#/components/schemas/IndividualTemporalData'
+        departure:
+          $ref: '#/components/schemas/IndividualTemporalData' 
+        pass:
+          $ref: '#/components/schemas/IndividualTemporalData'
+        scheduledCallType:
+          $ref: '#/components/schemas/LocationCallType'
+        realtimeCallType:
+          $ref: '#/components/schemas/LocationCallType'
+        displayAs:
+          $ref: '#/components/schemas/LocationDisplayAs'
+        status:
+          $ref: '#/components/schemas/LocationStatus'
+        isInterpolated:
+          type: boolean
+          description: Indicates whether RTT has created this location in this schedule 
+          example: false
+
+    PlannedActualData:
+      type: object 
+      properties:
+        planned:
+          type: string 
+          example: 1
+          description: The planned value of this field
+        forecast:
+          description: The forecasted value of this field, not currently used
+          type: string 
+          example: null
+        actual: 
+          description: The actual value of this field.
+          type: string 
+          example: 2
+
+    LocationMetadata:
+      type: object
+      properties:
+        platform:
+          $ref: '#/components/schemas/PlannedActualData' 
+          description: Platform information for this location
+        line:
+          $ref: '#/components/schemas/PlannedActualData' 
+          description: Line information for this location (line is *where the service is next going*)
+        path: 
+          $ref: '#/components/schemas/PlannedActualData' 
+          description: Path information for this location (path is *where the service is coming from*)
+        numberOfVehicles:
+          type: integer
+          description: The number of passenger vehicles on the train 
+        allocationIndex:
+          type: integer
+          description: The allocation index relating to this train service
+        isRequestStop:
+          type: boolean
+          description: Indicates whether this location is a request stop
+
+    NetworkRailLocationMetadata:
+      allOf:
+        - $ref: '#/components/schemas/LocationMetadata'
+        - type: object
+          properties:
+            stockBranding:
+              type: string
+              description: States the branding of the stock if relevant
+            allowances:
+              type: object
+              description: |
+                Contains timing allowances for this location. This object is not guaranteed to be present on a location search (only on a service query). Individual values may be null if not applicable.
+              properties:
+                engineering:
+                  oneOf:
+                    - type: integer
+                    - type: 'null'
+                  description: Engineering allowance in seconds
+                pathing:
+                  oneOf:
+                    - type: integer
+                    - type: 'null'
+                  description: Pathing allowance in seconds
+                performance:
+                  oneOf:
+                    - type: integer
+                    - type: 'null'
+                  description: Performance allowance in seconds
+
+    ScheduleMetadata:
+      type: object
+      properties:
+        uniqueIdentity:
+          type: string
+          description: Unique identifier for this train service on this day
+          example: "gb-nr:L01525:2025-10-26"
+        namespace:
+          type: string
+          description: The operating namespace of this service
+          example: gb-nr
+        identity:
+          type: string
+          description: The operating identity of this service
+          example: L01525
+        departureDate:
+          type: string
+          description: The departure date of this train service from its planned origin
+          format: date
+          example: "2025-10-26"
+        operator:
+          type: object
+          properties:
+            code:
+              type: string
+              example: SW
+            name:
+              type: string
+              example: South Western Railway
+              description: |
+                The full length name of this train operator.
+
+                **IMPORTANT**: you should not cache this field based on the operator code, particularly in the gb-nr namespace. For some train operators, we may change this field to reflect an operating brand rather than the true operator name. 
+        modeType:
+          type: string
+          description: Describes the form of transport that is being operated on this service. Note that BUS is deprecated and will soon be removed; and is only in place until we can make some technical changes.
+          enum:
+            - TRAIN
+            - SHIP
+            - BUS
+            - SCHEDULED_BUS
+            - REPLACEMENT_BUS
+          example: TRAIN
+        inPassengerService:
+          type: boolean
+          description: Identifies whether the service is operating in passenger service
+          example: true
+        allocations:
+          type: object
+          description: |
+            Contains allocation data.
+
+            Specification TBD.
+
+    NetworkRailScheduleMetadata:
+      allOf:
+        - $ref: '#/components/schemas/ScheduleMetadata'
+        - type: object
+          properties:
+            trainReportingIdentity:
+              type: string
+              description: The reporting identity of this service, commonly known as headcode
+              format: date
+              example: "1L40"
+            stpIndicator:
+              type: string
+              description: STP indicator for this service. Only available in detailed mode.
+              enum:
+                - WTT
+                - VAR
+                - STP
+                - CAN
+                - VST
+                - VVR
+                - VCN
+            runsAsRequired:
+              type: boolean
+              description: Indicates if this schedule is planned to run as required. Only available in detailed mode.
+              example: false
+
+    LocationLineUpBaseObject:
+      type: object
+      description: Base object for location line-up data shared across all namespaces
+      properties:
+        temporalData:
+          $ref: '#/components/schemas/LocationTemporalData'
+          description: Arrival, departure, and pass timing information for this service at this location
+        locationMetadata:
+          $ref: '#/components/schemas/LocationMetadata'
+          description: Platform, line, path, and vehicle information for this location
+        reasons:
+          $ref: '#/components/schemas/LocationReasonContainer'
+          description: Delay or cancellation reasons applicable to this service at this location
+        origin:
+          type: array
+          description: The origin location(s) of this service
+          items:
+            $ref: "#/components/schemas/LocationPair"
+        destination:
+          type: array
+          description: The destination location(s) of this service
+          items:
+            $ref: "#/components/schemas/LocationPair"
+
+    LocationLineUpObject:
+      description: Generic location line-up object suitable for all namespaces
+      allOf:
+        - $ref: '#/components/schemas/LocationLineUpBaseObject'
+        - type: object
+          properties:
+            scheduleMetadata:
+              $ref: '#/components/schemas/ScheduleMetadata'
+              description: Generic schedule metadata for this service
+
+    NetworkRailLocationLineUpBaseObject:
+      description: Base object for location line-up data with Network Rail specific fields
+      allOf:
+        - $ref: '#/components/schemas/LocationLineUpBaseObject'
+        - type: object
+          properties:
+            locationMetadata:
+              $ref: '#/components/schemas/NetworkRailLocationMetadata'
+              description: Platform, line, path, vehicle, and stock branding information for this location
+
+    NetworkRailLocationLineUpObject:
+      description: Network Rail specific location line-up object with additional NR-specific fields
+      allOf:
+        - $ref: '#/components/schemas/NetworkRailLocationLineUpBaseObject'
+        - type: object
+          properties:
+            scheduleMetadata:
+              $ref: '#/components/schemas/NetworkRailScheduleMetadata'
+              description: Network Rail specific schedule metadata including train reporting identity (headcode)
+
+    ReasonBlock:
+      type: object 
+      properties:
+        type:
+          type: string 
+          description: Defines the type of reason
+          enum: 
+            - DELAY
+            - CANCEL
+          example: DELAY
+        code: 
+          type: string 
+          description: This is the underlying reason code sourced from the providing system 
+          example: TB 
+        system:
+          type: string 
+          description: This is the providing system for this reason code 
+          example: TRUST 
+        shortText:
+          type: string 
+          description: Short, no more than 40 character, description of the cause of the delay 
+          example: TOC request
+        longText: 
+          anyOf:
+            - type: string 
+            - type: 'null'
+          description: |
+            Long description of the cause of the delay.
+
+            If null, they are the same as the shortText.
+          example: At the request of the train operator.
+
+    LocationReasonContainer:
+      type: array 
+      description: Lists the defined delay or cancellation reasons for a delay or cancellation of this service in the context of where this object is seen
+      items:
+        $ref: '#/components/schemas/ReasonBlock'
+    
+    ServiceLocations:
+      type: array
+      items:
+        type: object
+        properties:
+          temporalData:
+            $ref: '#/components/schemas/LocationTemporalData'
+          locationMetadata:
+            $ref: '#/components/schemas/LocationMetadata'
+          location:
+            $ref: '#/components/schemas/GeographicLocation'
+          associatedServices:
+            type: array
+            description: |
+              Associated services at this location (e.g. joins, divides, formations).
+
+              Associations that are not advertised to the public (where isPublic is false) are only included when detailed mode is enabled.
+            items:
+              $ref: '#/components/schemas/AssociatedService'
+
+    NetworkRailServiceLocations:
+      type: array
+      items:
+        type: object
+        properties:
+          temporalData:
+            $ref: '#/components/schemas/LocationTemporalData'
+          locationMetadata:
+            $ref: '#/components/schemas/NetworkRailLocationMetadata'
+          location:
+            $ref: '#/components/schemas/GeographicLocation'
+          associatedServices:
+            type: array
+            description: |
+              Associated services at this location (e.g. joins, divides, formations).
+
+              Associations that are not advertised to the public (where isPublic is false) are only included when detailed mode is enabled.
+            items:
+              $ref: '#/components/schemas/NetworkRailAssociatedService'
+
+    AssociationType:
+      type: string
+      description: |
+        Describes the type of association between two services at a location
+
+        * JOIN_FROM: this service is joined by this associated service
+        * JOIN_INTO: this service joins the associated service  
+        * DIVIDE_INTO: service divides from this to the associated service
+        * DIVIDE_FROM: this associated service divides to form this service 
+        * FORM_INTO: this service forms this associated service  
+        * FORM_FROM: this service is formed by the associated service 
+
+      enum:
+        - JOIN_FROM
+        - JOIN_INTO
+        - DIVIDE_INTO
+        - DIVIDE_FROM
+        - FORM_INTO
+        - FORM_FROM
+
+    AssociationData:
+      type: object
+      properties:
+        associationType:
+          $ref: '#/components/schemas/AssociationType'
+        isPublic:
+          type: boolean
+          description: Indicates whether this is an advertised association
+
+    AssociatedService:
+      type: object
+      description: An associated service at this location
+      properties:
+        associationData:
+          $ref: '#/components/schemas/AssociationData'
+        scheduleMetadata:
+          $ref: '#/components/schemas/ScheduleMetadata'
+
+    NetworkRailAssociatedService:
+      type: object
+      description: An associated service at this location with Network Rail specific metadata
+      properties:
+        associationData:
+          $ref: '#/components/schemas/AssociationData'
+        scheduleMetadata:
+          $ref: '#/components/schemas/NetworkRailScheduleMetadata'
+
+    LocationPair:
+      type: object
+      properties:
+        location:
+          $ref: '#/components/schemas/GeographicLocation'
+        temporalData:
+          $ref: '#/components/schemas/IndividualTemporalData'
+
+    NetworkRailAllocationItem:
+      type: object 
+      properties:
+        stockType:
+          type: string
+          enum:
+            - "UNIT"
+            - "LOCO"
+            - "WAGON"
+            - "CARRIAGE"
+            - "SET"
+          example: UNIT
+          description: Describes the type of allocation item being referred to. Note a loco, wagon and carriage describes a singular vehicle whereas a unit or set describes a number of vehicles.
+        identity:
+          type: string 
+          description: The TOPS number of the stockType as recorded in the rolling stock library, note that this may not be the same as the painted number 
+          example: 444045
+        inReverse:
+          type: boolean
+          description: Describes whether the unit is intended to be in reverse formation, defined by the source data. This is informative and the system has already reversed componentVehicles, if any.
+          example: false 
+        identitySuppressed:
+          type: boolean 
+          description: Indicates whether the identity has been deliberately suppressed.
+          example: false 
+        numberOfVehicles:
+          type: integer 
+          description: If present and greater than 0, describes the number of vehicles represented by this allocation item
+          example: 5
+        componentVehicles:
+          type: array
+          description: Indicates the component vehicles of this unit or set, if present.
+          items:
+            type: object 
+            properties:
+              identity:
+                type: string 
+                description: The TOPS number of this individual vehicle as recorded in the rolling stock library, note that this may not be the same as the painted number 
+                example: 63895
+              isPassengerVehicle:
+                type: boolean
+                description: Indicates whether this vehicle can carry passengers in seats.
+                example: true 
+              isLocomotive:
+                type: boolean
+                description: Indicates whether this vehicle is actually a locomotive. 
+                example: false 
+              index: 
+                type: integer 
+                description: Indicates the index position of this vehicle as provided from upstream. 
+                example: 0
+
+    NetworkRailAllocation: 
+      type: object 
+      properties:
+        allocationIndex:
+          type: integer
+          description: Allows you to connect this allocation object to the relevant location, on departure from that location
+          example: 0
+        leadingClass:
+          type: string
+          description: Describes the leading class of vehicle that can provide power
+          example: 444
+        passengerVehicles:
+          type: integer 
+          description: Number of vehicles in formation that can carry passengers 
+          example: 10 
+        allocationItems:
+          type: array 
+          items:
+            $ref: '#/components/schemas/NetworkRailAllocationItem'
+        knowYourTrainData:
+          $ref: '#/components/schemas/NetworkRailKnowYourTrainData'
+
+    NetworkRailAllocationData:
+      type: array 
+      items:
+        $ref: '#/components/schemas/NetworkRailAllocation'
+
+    NetworkRailKnowYourTrainData:
+      type: object 
+      properties:
+        stockBranding:
+          type: string
+          description: States the branding of the stock if relevant
+        commonFacilities:
+          oneOf:
+            - $ref: '#/components/schemas/KnowYourTrainFacilityList'
+            - type: 'null'
+          description: Facilities common to all groups in the formation. May be null or not present.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowYourTrainDataGroup'
+
+    KnowYourTrainDataGroup:
+      type: object
+      properties:
+        identity:
+          type: string 
+          description: Populated if it should be displayed below the vehicle group. Identifies the vehicle/unit/set.
+        groupFacilities:
+          oneOf:
+            - $ref: '#/components/schemas/KnowYourTrainFacilityList'
+            - type: 'null'
+          description: Facilities available to only this group. May be null or not present. 
+        vehicles:
+          type: array 
+          items:
+            type: object
+            properties:
+              graphic:
+                type: string
+                description: Refers to the image graphic path to be displayed.+
+              isPassengerVehicle:
+                type: boolean 
+                description: Indicates whether this a passenger vehicle and if a coach 
+              coachLetter:
+                type: string 
+                description: Coach letter that should be displayed 
+              individualFacilities:
+                oneOf:
+                  - $ref: '#/components/schemas/KnowYourTrainFacilityList'
+                  - type: 'null'
+                description: Facilities available to only this vehicle. May be null or not present. 
+    
+    KnowYourTrainFacilityList:
+      type: array
+      description: |
+        A list of facilities available on the train. Values are not strictly defined but currently known values include:
+        wifi, bicycle, wheelchair, toilet, power, usb, buffet, quiet, baby-changing, aircon, luggage, sleeper, first, entertainment
+      items:
+        type: string
+      example:
+        - wifi
+        - power
+        - toilet
+
+    EntitlementList:
+      type: array
+      description: Lists the available entitlements to the currently in-use API key 
+      example:
+        - allowDetailed
+        - allowAllocations 
+      items:
+        type: string 
+        
+
+security:
+  - BearerToken: []
+
+paths:
+  /rtt/location:
+    get:
+      tags:
+        - generic
+      summary: Generic location line-up for all namespaces
+      description: Searches for train services at a location level, returns train services listing data at that specific location. Generic for all namespaces.
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+        - in: query
+          name: code
+          schema:
+            type: string 
+          required: true 
+          description: Any short or long code of the location being queried
+          example: gb-nr:CLPHMJN
+        - in: query
+          name: filterFrom
+          schema:
+            type: string 
+          required: false
+          description: Any short or long code, filters by trains previously calling at location. If used, namespace must match code.
+          example: gb-nr:WAT
+        - in: query
+          name: filterTo
+          schema:
+            type: string 
+          required: false
+          description: Any short or long code, filters by trains subsequently calling at location. If used, namespace must match code.
+          example: gb-nr:WOK
+        - in: query 
+          name: timeFrom
+          schema:
+            type: string 
+            format: date-time
+            description: ISO 8601 datetime (e.g. "2025-10-25T13:45:30+01:00" or "2025-10-25T13:45:30"). If no timezone offset is provided, the local timezone of the queried location is assumed. A datetime without any timezone data is permitted.
+            example: "2025-10-25T13:45:30Z"
+          required: false 
+          description: |
+            The starting time window for the requested query, if timeTo is not defined then a 60 minute window by default is defined. 
+
+            If not defined, defaults to the current time.
+          example: "2025-10-25T13:00:00"
+        - in: query
+          name: timeTo
+          schema:
+            type: string 
+            format: date-time
+            description: ISO 8601 datetime (e.g. "2025-10-25T13:45:30+01:00" or "2025-10-25T13:45:30"). If no timezone offset is provided, the local timezone of the queried location is assumed. A datetime without any timezone data is permitted.
+            example: "2025-10-25T13:45:30Z"
+          required: false 
+          description: |
+            The end of the time window for the requested query, if this is not defined then end is assumed to be 60 minutes later than timeFrom.
+
+            **The maximum query duration is 23 hours 59 minutes.**
+
+            Time window functionality may be limited by your authorisation token.
+
+            **May not be used with timeWindow.**
+          example: "2025-10-25T14:30:00"
+        - in: query 
+          name: timeWindow
+          schema:
+            type: integer
+            default: 60
+          required: false
+          description: |
+            If set true, this changes the default time window from 60 minutes to this value, and will set the timeTo value based on a fixed increase from timeFrom.
+
+            **May not be used with timeTo.**
+
+            Time window functionality may be limited by your authorisation token.
+          example: 120
+        - in: query
+          name: timeTolerance
+          schema:
+            type: boolean
+            default: false
+          example: false 
+          required: false 
+          description:
+            If set to true, this adjusts the time_from value slightly earlier based on the time window time in minutes. 
+
+            Time window functionality may be limited by your authorisation token.
+        - in: query 
+          name: detailed 
+          schema:
+            type: boolean 
+            default: false
+          example: false 
+          required: false 
+          description: |
+            If set to true, enables detailed mode when available in the namespace. Will also enable internal times to be displayed.
+
+            This functionality may be limited by your authorisation token.
+      responses:
+        '200':
+          description: Valid query, services found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systemStatus:
+                    $ref: '#/components/schemas/SystemStatus'
+                  query:
+                    type: object
+                    properties:
+                      location: 
+                        $ref: '#/components/schemas/GeographicLocation'
+                      timeFrom: 
+                        $ref: '#/components/schemas/StandardisedDateTime'
+                      timeTo:
+                        $ref: '#/components/schemas/StandardisedDateTime'
+                  reasons:
+                    $ref: '#/components/schemas/LocationReasonContainer'
+                  services:
+                    type: array 
+                    items:
+                      $ref: '#/components/schemas/LocationLineUpObject'
+        '204':
+          description: Valid query, no services found
+        '400':
+          description: Invalid query
+  /rtt/service:
+    get:
+      tags:
+        - generic
+      summary: Generic service query for all namespaces
+      description: Searches for a requested train service, returning a generic data set suitable for all namespaces
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+        - in: query
+          name: uniqueIdentity
+          schema:
+            type: string 
+          required: false 
+          description: |
+            The unique identifier of a train service, which includes namespace, identity and departure date from origin.
+
+            **Required if _namespace_, _identity_ and _departureDate_ not set.**
+          example: gb-nr:L01525:2025-10-26
+        - in: query 
+          name: namespace
+          schema:
+            type: string 
+            default: "gb-nr"
+          example: "gb-nr"
+          required: false
+          description: |
+            The namespace of the service being queried.
+
+            **Required if _uniqueIdentity_ not set.**
+        - in: query 
+          name: identity
+          schema:
+            type: string 
+          example: L01525
+          required: false
+          description: |
+            The identity of the service being queried.
+
+            **Required if _uniqueIdentity_ not set.**
+        - in: query 
+          name: departureDate
+          schema:
+            type: string 
+            format: date
+          example: "2025-10-26"
+          required: false
+          description: |
+            The identity of the service being queried.
+
+            **Required if _uniqueIdentity_ not set.**
+        - in: query
+          name: detailed
+          schema:
+            type: boolean
+            default: false
+          example: false
+          required: false
+          description: |
+            If set to true, enables detailed mode when available in the namespace. Will also enable internal times to be displayed.
+
+            This functionality may be limited by your authorisation token.
+      responses:
+        '200':
+          description: Returns the data for a service
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systemStatus:
+                    $ref: '#/components/schemas/SystemStatus'
+                  query:
+                    type: object
+                    properties:
+                      uniqueIdentity:
+                        type: string
+                        description: |
+                          The unique identifier of a train service, which includes namespace, identity and departure date from origin.
+                        example: gb-nr:L01525:2025-10-26
+                  service:
+                    type: object
+                    properties:
+                      scheduleMetadata:
+                        $ref: '#/components/schemas/ScheduleMetadata'
+                      locations:
+                        $ref: '#/components/schemas/ServiceLocations'
+                      origin:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LocationPair"
+                      destination:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LocationPair"
+                      reasons:
+                        $ref: '#/components/schemas/LocationReasonContainer'
+
+        '404':
+          description: Service cannot be found
+
+  /gb-nr/location:
+    get:
+      tags:
+        - network-rail
+      summary: Network Rail specific location line-up for all namespaces
+      description: Searches for train services at a location level, returns train services listing data at that specific location.
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+        - in: query
+          name: code
+          schema:
+            type: string 
+          required: true 
+          description: Any short or long code of the location being queried
+          example: CLPHMJN
+        - in: query
+          name: filterFrom
+          schema:
+            type: string 
+          required: false
+          description: Any short or long code, filters by trains previously calling at location
+          example: WAT
+        - in: query
+          name: filterTo
+          schema:
+            type: string 
+          required: false
+          description: Any short or long code, filters by trains subsequently calling at location
+          example: WOK
+        - in: query 
+          name: timeFrom
+          schema:
+            type: string 
+            format: date-time
+            description: ISO 8601 datetime (e.g. "2025-10-25T13:45:30+01:00" or "2025-10-25T13:45:30"). If no timezone offset is provided, the local timezone of the queried location is assumed. A datetime without any timezone data is permitted.
+            example: "2025-10-25T13:45:30Z"
+          required: false 
+          description: |
+            The starting time window for the requested query, if timeTo is not defined then a 60 minute window by default is defined. 
+
+            If not defined, defaults to the current time.
+          example: "2025-10-25T13:00:00"
+        - in: query
+          name: timeTo
+          schema:
+            type: string 
+            format: date-time
+            description: ISO 8601 datetime (e.g. "2025-10-25T13:45:30+01:00" or "2025-10-25T13:45:30"). If no timezone offset is provided, the local timezone of the queried location is assumed. A datetime without any timezone data is permitted.
+            example: "2025-10-25T13:45:30Z"
+          required: false 
+          description: |
+            The end of the time window for the requested query, if this is not defined then end is assumed to be 60 minutes later than timeFrom.
+
+            **The maximum query duration is 23 hours 59 minutes.**
+
+            Time window functionality may be limited by your authorisation token.
+
+            **May not be used with timeWindow.**
+          example: "2025-10-25T14:30:00"
+        - in: query 
+          name: timeWindow
+          schema:
+            type: integer
+            default: 60
+          required: false
+          description: |
+            If set true, this changes the default time window from 60 minutes to this value, and will set the timeTo value based on a fixed increase from timeFrom.
+
+            **May not be used with timeTo.**
+
+            Time window functionality may be limited by your authorisation token.
+          example: 120
+        - in: query
+          name: timeTolerance
+          schema:
+            type: boolean
+            default: false
+          example: false 
+          required: false 
+          description:
+            If set to true, this adjusts the time_from value slightly earlier based on the time window time in minutes. 
+
+            Time window functionality may be limited by your authorisation token.
+        - in: query 
+          name: detailed 
+          schema:
+            type: boolean 
+            default: false
+          example: false 
+          required: false 
+          description: |
+            If set to true, enables detailed mode when available in the namespace. Will also enable internal times to be displayed.
+
+            This functionality may be limited by your authorisation token.
+        - in: query
+          name: stpFilter
+          schema:
+            type: string
+            pattern: '^[WVSC]{1,4}$'
+          required: false
+          description: |
+            Filters services by STP indicator. A string of up to 4 characters, where each character represents an STP type:
+
+            * **W**: WTT (Working Timetable)
+            * **V**: VAR (Variation)
+            * **S**: STP (Short Term Plan)
+            * **C**: CAN (Cancellation)
+
+            Only works in detailed mode. May be limited by your authorisation token.
+          example: WVS
+      responses:
+        '200':
+          description: Valid query, services found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systemStatus:
+                    $ref: '#/components/schemas/SystemStatus'
+                  query:
+                    type: object
+                    properties:
+                      location:
+                        $ref: '#/components/schemas/GeographicLocation'
+                      timeFrom:
+                        $ref: '#/components/schemas/StandardisedDateTime'
+                      timeTo:
+                        $ref: '#/components/schemas/StandardisedDateTime'
+                      stpFilter:
+                        type: object
+                        description: Reflects the STP filter applied to this query. Only present if stpFilter has been presented and it has been accepted.
+                        properties:
+                          WTT:
+                            type: boolean
+                          VAR:
+                            type: boolean
+                          STP:
+                            type: boolean
+                          CAN:
+                            type: boolean
+                  reasons:
+                    $ref: '#/components/schemas/LocationReasonContainer'
+                  services:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NetworkRailLocationLineUpObject'
+        '204':
+          description: Valid query, no services found
+        '400':
+          description: Invalid query
+
+  /gb-nr/service:
+    get:
+      tags:
+        - network-rail
+      summary: Network Rail specific service query for all namespaces
+      description: Searches for a requested train service, returning with more specific Network Rail outputs.
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+        - in: query
+          name: uniqueIdentity
+          schema:
+            type: string 
+          required: false 
+          description: |
+            The unique identifier of a train service, which includes identity and departure date from origin.
+
+            **Required if _identity_ and _departureDate_ not set.**
+          example: L01525:2025-10-26
+        - in: query 
+          name: identity
+          schema:
+            type: string 
+          example: L01525
+          required: false
+          description: |
+            The identity of the service being queried.
+
+            **Required if _uniqueIdentity_ not set.**
+        - in: query 
+          name: departureDate
+          schema:
+            type: string 
+            format: date
+          example: "2025-10-26"
+          required: false
+          description: |
+            The identity of the service being queried.
+
+            **Required if _uniqueIdentity_ not set.**
+        - in: query
+          name: detailed
+          schema:
+            type: boolean
+            default: false
+          example: false
+          required: false
+          description: |
+            If set to true, enables detailed mode when available in the namespace. Will also enable internal times to be displayed.
+
+            This functionality may be limited by your authorisation token.
+      responses:
+        '200':
+          description: Returns the data for a service
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systemStatus:
+                    $ref: '#/components/schemas/SystemStatus'
+                  query:
+                    type: object
+                    properties:
+                      uniqueIdentity:
+                        type: string
+                        description: |
+                          The unique identifier of a train service, which includes namespace, identity and departure date from origin.
+                        example: gb-nr:L01525:2025-10-26
+                  service:
+                    type: object
+                    properties:
+                      scheduleMetadata:
+                        $ref: '#/components/schemas/NetworkRailScheduleMetadata'
+                      locations:
+                        $ref: '#/components/schemas/NetworkRailServiceLocations'
+                      allocationData:
+                        description: |
+                          Rolling stock allocation of this service, may or may not be populated.
+
+                          Various fields in this block may not be included, depending on your authentication token.
+                        $ref: '#/components/schemas/NetworkRailAllocationData'
+                      origin:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LocationPair"
+                      destination:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LocationPair"
+                      reasons:
+                        $ref: '#/components/schemas/LocationReasonContainer'
+        '404':
+          description: Service cannot be found
+
+  /gb-nr/allocations_by_service:
+    get:
+      tags:
+        - network-rail
+      deprecated: true
+      summary: Allocation listing by service for a given TOC and date
+      description: |
+        Returns rolling stock allocation data listed by service for a given TOC and departure date.
+
+        Requires the `allowFullAllocationListing` entitlement. Access may be further restricted by TOC.
+
+        **Deprecated:** use `/gb-nr/allocations/by-service` instead.
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+        - in: query
+          name: departureDate
+          schema:
+            type: string
+            format: date
+          required: true
+          description: Scheduled date of departure from origin
+          example: "2025-10-26"
+        - in: query
+          name: toc
+          schema:
+            type: string
+          required: true
+          description: Requested TOC filter
+          example: SW
+      responses:
+        '200':
+          description: Valid query, allocations found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systemStatus:
+                    $ref: '#/components/schemas/SystemStatus'
+                  query:
+                    type: object
+                    properties:
+                      departureDate:
+                        type: string
+                        format: date
+                        example: "2025-10-26"
+                      toc:
+                        type: string
+                        example: SW
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        scheduleMetadata:
+                          $ref: '#/components/schemas/NetworkRailScheduleMetadata'
+                        origin:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/LocationPair'
+                        destination:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/LocationPair'
+                        allocations:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              attached:
+                                $ref: '#/components/schemas/LocationPair'
+                              detached:
+                                $ref: '#/components/schemas/LocationPair'
+                              allocationIndex:
+                                type: integer
+                                description: Index of this allocation, starting from 0
+                                example: 0
+                              allocationItems:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/NetworkRailAllocationItem'
+        '400':
+          description: Invalid query
+        '401':
+          description: Missing required entitlement or TOC access restricted
+
+  /gb-nr/allocations/by-service:
+    get:
+      tags:
+        - network-rail
+      summary: Allocation listing by service for a given TOC and date
+      description: |
+        Returns rolling stock allocation data listed by service for a given TOC and departure date.
+
+        Requires the `allowFullAllocationListing` or `allowFullAllocationListingPassenger` entitlements. Access may be further restricted by TOC.
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+        - in: query
+          name: departureDate
+          schema:
+            type: string
+            format: date
+          required: true
+          description: Scheduled date of departure from origin
+          example: "2025-10-26"
+        - in: query
+          name: toc
+          schema:
+            type: string
+          required: true
+          description: Requested TOC filter
+          example: SW
+      responses:
+        '200':
+          description: Valid query, allocations found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systemStatus:
+                    $ref: '#/components/schemas/SystemStatus'
+                  query:
+                    type: object
+                    properties:
+                      departureDate:
+                        type: string
+                        format: date
+                        example: "2025-10-26"
+                      toc:
+                        type: string
+                        example: SW
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        scheduleMetadata:
+                          $ref: '#/components/schemas/NetworkRailScheduleMetadata'
+                        origin:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/LocationPair'
+                        destination:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/LocationPair'
+                        allocations:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              attached:
+                                $ref: '#/components/schemas/LocationPair'
+                              detached:
+                                $ref: '#/components/schemas/LocationPair'
+                              allocationIndex:
+                                type: integer
+                                description: Index of this allocation, starting from 0
+                                example: 0
+                              allocationItems:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/NetworkRailAllocationItem'
+        '400':
+          description: Invalid query
+        '401':
+          description: Missing required entitlement or TOC access restricted
+
+  /gb-nr/allocations/by-class:
+    get:
+      tags:
+        - network-rail
+      summary: Allocation listing by class member for a given class and date
+      description: |
+        Returns rolling stock allocation data listed by class member (identity) for a given class and departure date.
+
+        Requires the `allowFullAllocationListing` or `allowFullAllocationListingPassenger` entitlements. Access may be further restricted by TOC.
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+        - in: query
+          name: departureDate
+          schema:
+            type: string
+            format: date
+          required: true
+          description: Scheduled date of departure from origin
+          example: "2025-10-26"
+        - in: query
+          name: class
+          schema:
+            type: string
+          required: true
+          description: Requested rolling stock class filter
+          example: "444"
+      responses:
+        '200':
+          description: Valid query, allocations found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  systemStatus:
+                    $ref: '#/components/schemas/SystemStatus'
+                  query:
+                    type: object
+                    properties:
+                      departureDate:
+                        type: string
+                        format: date
+                        example: "2025-10-26"
+                      class:
+                        type: string
+                        example: "444"
+                  identities:
+                    type: object
+                    description: |
+                      Dictionary of allocations keyed by class member (identity). Each key is a unit number
+                      (e.g. `444001`) mapping to the list of allocations for that unit on the requested date.
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          attached:
+                            $ref: '#/components/schemas/LocationPair'
+                          detached:
+                            $ref: '#/components/schemas/LocationPair'
+                          service:
+                            $ref: '#/components/schemas/NetworkRailScheduleMetadata'
+        '400':
+          description: Invalid query
+        '401':
+          description: Missing required entitlement or TOC access restricted
+
+  /data/locations_ungrouped:
+    get:
+      tags:
+        - referenceData
+      summary: Get a list of locations
+      description: |
+        Gets a full list of locations from the database across namespaces available to you.
+
+        This endpoint will return a filtered list of locations in your namespace.
+
+        Note that while the main operation of the system will group similar locations together (e.g. on shortCodes), this endpoint does not do so. Each location item is returned individually. 
+
+        For locations like Clapham Junction (in the gb-nr namespace), 5 locations will appear with the same short code as separate objects.
+
+        Available in API version 2026-04-09 onwards.
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+      responses:
+        '200':
+          description: A list of all locations 
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locations:
+                    type: array 
+                    items:
+                      type: object 
+                      properties:
+                        namespace:
+                          type: string 
+                          description: Namespace of the location
+                          default: gb-nr 
+                        description:
+                          type: string 
+                          description: Long text description of the location
+                          example: Clapham Junction 
+                        shortCode:
+                          type: string 
+                          example: CLJ 
+                        longCode:
+                          type: string 
+                          example: CLPHMJN
+                        uniqueIdentity:
+                          type:
+                          example: gb-nr:CLPHMJN
+  
+  /data/stops:
+    get:
+      tags:
+        - referenceData
+      summary: Get a list of stops
+      description: |
+        Gets a full list of stops from the database across namespaces available to you. We define a stop as any location at which a service may stop (validly) for passenger usage, this may include railway stations, bus stops, tram stops, etc.
+
+        This endpoint will return a filtered list of stops in your namespace.
+      
+        Available in API version 2026-04-09 onwards.      
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+      responses:
+        '200':
+          description: A list of all stops 
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stops:
+                    type: array 
+                    items:
+                      type: object 
+                      properties:
+                        namespace:
+                          type: string 
+                          description: Namespace of the location
+                          default: gb-nr 
+                        description:
+                          type: string 
+                          description: Long text description of the location
+                          example: Clapham Junction 
+                        shortCode:
+                          type: string 
+                          example: CLJ 
+                        uniqueIdentity:
+                          type:
+                          example: gb-nr:CLJ
+  
+
+  /api/info:
+    get:
+      tags:
+        - api
+      summary: Get info on version and credentials
+      description: Provides information about the current API version and access credentials being used
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_version:
+                    type: string 
+                    description: Provides the current version of the API being presented 
+                    example: 2026-01-18
+                  credentials:
+                    type: object 
+                    properties: 
+                      entitlements:
+                        $ref: '#/components/schemas/EntitlementList'
+                      historyRestriction:
+                        type: boolean
+                        description: Indicates whether historical lookback restrictions are being placed on this API key 
+                        example: true 
+                      historyRestrictToDays:
+                        type: integer
+                        description: Indicates number of days that history is restricted to
+                        null: true 
+                        example: 14
+                        default: 14 
+                      namespaceRestriction:
+                        type: boolean
+                        description: Indicates whether this API key is restricted to certain namespaces
+                        example: true 
+                      namespacesAvailable:
+                        type: array
+                        description: Lists the available namespaces to this API key if restricted 
+                        null: true 
+                        example:
+                          - gb-nr
+
+  /api/get_access_token:
+    get:
+      tags:
+        - api
+      summary: Provides an access token if the user only has a refresh token
+      description: With a given refresh token provided as the bearer, the system returns a short life access token with the necessary entitlements
+      parameters:
+        - $ref: '#/components/parameters/VersionHeader'
+        - $ref: '#/components/parameters/VersionQuery'
+      responses:
+        '200':
+          description: An access token
+          content:
+            application/json:
+              schema:
+                type: object 
+                properties:
+                  token:
+                    type: string 
+                    description: Access token for use against remaining API calls 
+                  entitlements:
+                    $ref: '#/components/schemas/EntitlementList'
+                  validUntil:
+                    type: string 
+                    format: date-time 
+                    description: Expiry time of this token 
+
+                        
