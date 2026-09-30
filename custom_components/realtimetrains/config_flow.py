@@ -29,6 +29,7 @@ from .api import (
 )
 from .parsing import tidy_station_name
 from .const import (
+    CONF_BUDGET_SHARE,
     CONF_FAST_INTERVAL,
     CONF_FAST_WINDOW,
     CONF_MAX_DEPARTURES,
@@ -207,6 +208,9 @@ class RealTimeTrainsOptionsFlow(OptionsFlowWithReload):
                 vol.Required(CONF_MEDIUM_WINDOW, default=current[CONF_MEDIUM_WINDOW]): _minutes_selector(),
                 vol.Required(CONF_MEDIUM_INTERVAL, default=current[CONF_MEDIUM_INTERVAL]): _seconds_selector(),
                 vol.Required(CONF_SLOW_INTERVAL, default=current[CONF_SLOW_INTERVAL]): _seconds_selector(),
+                vol.Required(CONF_BUDGET_SHARE, default=current[CONF_BUDGET_SHARE]): NumberSelector(
+                    NumberSelectorConfig(min=10, max=90, step=1, mode=NumberSelectorMode.BOX, unit_of_measurement="%")
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

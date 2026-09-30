@@ -21,19 +21,27 @@ Live UK departures from one home station, using the Realtime Trains (RTT) API v2
     last_error, poll_interval_seconds, RTT system status, entitlements, token expiry.
 
 ## Polling and rate limits
-Polling adapts to how soon the next (non-cancelled) train leaves. Defaults - all changeable under
-Settings -> Devices & services -> RealTimeTrains -> **Configure**:
+RTT quotas are small (for example 10 calls/minute, 100/hour, 1000/day), so polling is deliberately frugal.
+
+**Schedule** - how soon the next (non-cancelled) train leaves decides the poll interval. Defaults, all
+changeable under Settings -> Devices & services -> RealTimeTrains -> **Configure**:
 
 | Next train due in | Poll every |
 |---|---|
-| under 10 min | 60 s |
-| 10 to 20 min | 120 s |
-| nothing within 20 min | 240 s |
+| under 3 min | 60 s |
+| 3 to 10 min | 120 s |
+| nothing within 10 min | 300 s |
 
-* Each poll is 1 Location call. Service (route) lookups are cached: a train's service is fetched once,
-  and again only if a Location call shows its due time at your station has changed.
-* Safety net: if an hourly/daily/weekly quota drops below 20% the interval is at least 5 min, below 5%
-  at least 15 min. On HTTP 429 the `Retry-After` value is honoured.
+**Cached route lookups** - a train's route (service lookup) is fetched once, and again only if a Location
+call shows its due time at your station has changed. At most 3 route lookups are made per poll (nearest
+trains first), so filling the cache after a restart takes a few polls and never bursts past the per-minute limit.
+
+**Budget governor** - independent of the schedule, average usage is held to a share of your hourly, daily and
+weekly quotas (default 75%, changeable). Short bursts are allowed (a reserve of 20%), so nothing is slowed
+down until usage genuinely runs ahead of budget; then polls are stretched just enough. Whatever the
+settings, calls in any hour/day/week stay within ~95% of the limit. The API status sensor shows
+`budget_delay_seconds` (extra wait added by the governor) and `budget_calls_available_hour/day`.
+On HTTP 429 the `Retry-After` value is honoured.
 
 ## Example template
 ```jinja

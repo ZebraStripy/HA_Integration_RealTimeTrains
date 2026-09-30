@@ -50,12 +50,17 @@ CONF_MEDIUM_INTERVAL = "medium_interval"
 CONF_SLOW_INTERVAL = "slow_interval"
 CONF_FAST_WINDOW = "fast_window_minutes"
 CONF_MEDIUM_WINDOW = "medium_window_minutes"
+CONF_BUDGET_SHARE = "budget_share_percent"   # % of the API quota we allow ourselves to use
 
-DEFAULT_FAST_INTERVAL = 60        # seconds
-DEFAULT_MEDIUM_INTERVAL = 120     # seconds
-DEFAULT_SLOW_INTERVAL = 240       # seconds
-DEFAULT_FAST_WINDOW = 10          # minutes
-DEFAULT_MEDIUM_WINDOW = 20        # minutes
+DEFAULT_FAST_INTERVAL = 60       # seconds
+DEFAULT_MEDIUM_INTERVAL = 120    # seconds
+DEFAULT_SLOW_INTERVAL = 300      # seconds
+DEFAULT_FAST_WINDOW = 3          # minutes
+DEFAULT_MEDIUM_WINDOW = 10       # minutes
+# These defaults are sized for a 1000-calls/day quota. Longer/faster settings
+# work too - the budget governor below slows polling down if usage runs ahead.
+
+DEFAULT_BUDGET_SHARE = 75          # percent of the Hour/Day/Week quota to use on average
 
 DEFAULT_OPTIONS = {
     CONF_FAST_INTERVAL: DEFAULT_FAST_INTERVAL,
@@ -63,22 +68,19 @@ DEFAULT_OPTIONS = {
     CONF_SLOW_INTERVAL: DEFAULT_SLOW_INTERVAL,
     CONF_FAST_WINDOW: DEFAULT_FAST_WINDOW,
     CONF_MEDIUM_WINDOW: DEFAULT_MEDIUM_WINDOW,
+    CONF_BUDGET_SHARE: DEFAULT_BUDGET_SHARE,
 }
 
 MIN_INTERVAL = 30                 # seconds; don't allow polling faster than this
 MAX_INTERVAL = 3600
 
-# Safety net on top of the schedule above: if a slow (hour/day/week) API quota
-# is running out, poll no faster than this regardless of the schedule.
-LOW_BUDGET_SCAN_INTERVAL = 300  # < 20% of a slow quota left
-CRITICAL_SCAN_INTERVAL = 900    # < 5% of a slow quota left
+# Service (route) lookups per refresh. RTT's per-minute limit can be as low as 10,
+# and a refresh already spends 1 call on the Location lookup, so route lookups are
+# spread over several refreshes (nearest trains first).
+MAX_SERVICE_CALLS_PER_UPDATE = 3
 
 # Rate-limit header dimensions defined by the RTT spec.
 RATE_LIMIT_DIMENSIONS = ("Minute", "Hour", "Day", "Week")
-# Dimensions that recover slowly - used to decide whether to slow polling down.
-# (Minute is deliberately excluded: it refills in a minute, so a burst at
-# start-up must not push us into a 15 minute polling interval.)
-SLOW_RATE_LIMIT_DIMENSIONS = ("Hour", "Day", "Week")
 
 # Values of the API status sensor
 STATUS_OK = "ok"                    # everything worked

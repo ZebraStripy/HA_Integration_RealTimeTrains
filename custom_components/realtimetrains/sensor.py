@@ -39,6 +39,11 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
+def _round_tokens(value: float | None) -> int | None:
+    """Governor tokens = calls we can still spend now without exceeding the budget."""
+    return None if value is None else round(value)
+
+
 class _RttEntity(CoordinatorEntity[RttCoordinator], SensorEntity):
     """Shared plumbing: all entities hang off one device named after the station."""
 
@@ -145,6 +150,9 @@ class RttApiStatusSensor(_RttEntity):
             ),
             "rtt_network_rail_status": status.system_status.get("realtimeNetworkRail"),
             "rtt_core_status": status.system_status.get("rttCore"),
+            "budget_delay_seconds": round(self.coordinator.budget_delay),
+            "budget_calls_available_hour": _round_tokens(self.coordinator.budget.tokens.get("Hour")),
+            "budget_calls_available_day": _round_tokens(self.coordinator.budget.tokens.get("Day")),
             "token_valid_until": status.token_valid_until.isoformat() if status.token_valid_until else None,
             "entitlements": status.entitlements,
         }

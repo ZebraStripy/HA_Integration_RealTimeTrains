@@ -50,13 +50,17 @@
     "step": {
       "init": {
         "title": "Polling schedule",
-        "description": "How often to poll depends on how soon the next train leaves. Each poll uses one API call (plus one for any new or re-timed train).",
+        "description": "How often to poll depends on how soon the next train leaves. Independently of this, a budget governor slows polling down if usage would exceed the share of your RTT API quota set below.",
         "data": {
           "fast_window_minutes": "Fast window (train due within)",
           "fast_interval": "Fast poll interval",
           "medium_window_minutes": "Medium window (train due within)",
           "medium_interval": "Medium poll interval",
-          "slow_interval": "Slow poll interval (nothing due within the medium window)"
+          "slow_interval": "Slow poll interval (nothing due within the medium window)",
+          "budget_share_percent": "Max average share of the API quota to use"
+        },
+        "data_description": {
+          "budget_share_percent": "Average use of the hourly, daily and weekly limits. 75 leaves headroom for restarts and bursts."
         }
       }
     },

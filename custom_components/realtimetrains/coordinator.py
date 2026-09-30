@@ -2,10 +2,14 @@
 
 One refresh cycle:
   1. Location lookup (1 API call)  -> the list of upcoming departures.
-  2. Service lookups (0..N calls)  -> full journey for each departure, but only
-     for trains we have never looked up, or whose due time at the home station
-     has changed since we last looked. Otherwise the cached copy is reused.
+  2. Service lookups (0..3 calls)  -> full journey for trains we have never looked
+     up, or whose due time at the home station has changed since we last looked.
+     Otherwise the cached copy is reused.
   3. Build one `Departure` per sensor (padded with None if fewer trains exist).
+
+After each cycle we choose how long to wait before the next one:
+  * the SCHEDULE (how soon the next train leaves), but never sooner than
+  * the BUDGET GOVERNOR allows (keeps us inside the RTT quota) - see budget.py.
 """
 from __future__ import annotations
 
@@ -27,7 +31,9 @@ from .api import (
     RttAuthError,
     RttRateLimitError,
 )
+from .budget import CallBudget
 from .const import (
+    CONF_BUDGET_SHARE,
     CONF_FAST_INTERVAL,
     CONF_FAST_WINDOW,
     CONF_MAX_DEPARTURES,
@@ -36,12 +42,10 @@ from .const import (
     CONF_SLOW_INTERVAL,
     CONF_STATION,
     CONF_STATION_NAME,
-    CRITICAL_SCAN_INTERVAL,
     DEFAULT_OPTIONS,
     DOMAIN,
     LOCATION_TIME_WINDOW_MINUTES,
-    LOW_BUDGET_SCAN_INTERVAL,
-    SLOW_RATE_LIMIT_DIMENSIONS,
+    MAX_SERVICE_CALLS_PER_UPDATE,
     STATUS_AUTH_ERROR,
     STATUS_DEGRADED,
     STATUS_ERROR,
@@ -95,8 +99,14 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
         self.slow_interval = int(opts[CONF_SLOW_INTERVAL])
         self.fast_window = int(opts[CONF_FAST_WINDOW])        # minutes
         self.medium_window = int(opts[CONF_MEDIUM_WINDOW])    # minutes
+
+        # Quota governor: average usage capped at this share of the RTT limits.
+        self.budget = CallBudget(share=int(opts[CONF_BUDGET_SHARE]) / 100)
+        self.budget_delay: float = 0.0   # seconds the governor added to the last interval
+
         # uniqueIdentity -> cached service detail
         self._service_cache: dict[str, _CachedService] = {}
+        self._next_due: datetime | None = None
 
         super().__init__(
             hass,
@@ -113,13 +123,31 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
         calls_before = status.calls_made
 
         try:
+            data = await self._async_poll(calls_before)
+        except (UpdateFailed, ConfigEntryAuthFailed):
+            # Failed polls still cost calls. Count them, and make sure repeated
+            # failures can't hammer the API faster than the budget allows.
+            self._record_calls(calls_before)
+            self.update_interval = timedelta(
+                seconds=max(self.update_interval.total_seconds(), self._budget_wait())
+            )
+            raise
+
+        self._record_calls(calls_before)
+        self.update_interval = self._choose_interval()
+        return data
+
+    async def _async_poll(self, calls_before: int) -> RttData:
+        """One refresh cycle (see module docstring). Raises UpdateFailed on API problems."""
+        status = self.client.status
+        try:
             # 1. One call gets the whole departure board for the window.
             location = await self.client.async_get_location(
                 self.station_code, LOCATION_TIME_WINDOW_MINUTES
             )  # None means HTTP 204: nothing running - not an error.
             candidates = parsing.select_departures(location, self.max_departures)
 
-            # 2. Enrich each departure with journey detail (cached where possible).
+            # 2. Enrich departures with journey detail (cached where possible).
             details, degraded = await self._async_get_details(candidates)
 
         except RttAuthError as err:
@@ -135,6 +163,11 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
             self._record_failure(STATUS_ERROR, err)
             raise UpdateFailed(str(err)) from err
 
+        # Remember when the next catchable train leaves; _choose_interval() uses it.
+        self._next_due = next(
+            (parsing.departure_time_of(s) for s in candidates if not parsing.is_cancelled(s)), None
+        )
+
         # 3. One Departure per requested sensor; unused slots stay None.
         departures: list[Departure | None] = [
             parsing.build_departure(
@@ -149,7 +182,6 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
         status.state = STATUS_DEGRADED if degraded else STATUS_OK
         status.last_success = dt_util.utcnow()
         status.last_error = None
-        self.update_interval = self._choose_interval(candidates)
 
         return RttData(
             departures=departures,
@@ -168,12 +200,17 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
         station has changed since the cached copy was fetched. There is no
         time-based expiry.
 
+        At most MAX_SERVICE_CALLS_PER_UPDATE lookups are made per refresh (nearest
+        trains first); the rest wait for the next refresh. This keeps us inside
+        RTT's per-minute limit, e.g. when filling the cache after a restart.
+
         `degraded` is True if any detail lookup was skipped or failed. The
         departure is still shown - just without (fresh) calling points.
         """
         details: dict[str, dict[str, Any]] = {}
         degraded = False
-        stop_fetching = False  # set when we hit a rate limit mid-way
+        stop_fetching = False   # set when we hit a rate limit mid-way
+        fetched = 0
 
         for svc in candidates:
             meta = svc.get("scheduleMetadata") or {}
@@ -192,15 +229,16 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
                 details[key] = cached.service
                 continue
 
-            # Budget guard: if a quota is nearly gone, keep the (stale) cache
-            # and save the remaining calls for the location lookup.
-            if stop_fetching or self.client.status.is_low():
+            # Hold back: per-update cap reached, or a quota is nearly gone. Keep
+            # any (stale) cached copy and save calls for the location lookup.
+            if stop_fetching or fetched >= MAX_SERVICE_CALLS_PER_UPDATE or self.client.status.is_low():
                 if cached:
                     details[key] = cached.service
                 degraded = True
                 continue
 
             try:
+                fetched += 1
                 service = await self.client.async_get_service(identity, date)
             except RttAuthError:
                 raise
@@ -232,21 +270,26 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
 
         return details, degraded
 
-    def _choose_interval(self, candidates: list[dict[str, Any]]) -> timedelta:
+    # ------------------------------------------------------------------
+    def _record_calls(self, calls_before: int) -> None:
+        """Tell the governor how many API calls the update just made."""
+        status = self.client.status
+        self.budget.record(dt_util.utcnow(), status.calls_made - calls_before, status.limits, status.remaining)
+
+    def _budget_wait(self) -> float:
+        """Seconds the governor needs before the next poll is affordable."""
+        return self.budget.seconds_until_allowed(self.client.status.limits)
+
+    def _choose_interval(self) -> timedelta:
         """How long to wait before the next poll.
 
         1. Schedule: driven by how soon the next (non-cancelled) train leaves.
-        2. Quota safety net: never poll faster than the low-budget floors when a
-           slow (hour/day/week) quota is running out.
+        2. Governor: never sooner than the API quota budget allows.
         """
-        # Next train we could actually catch (cancelled ones don't need fast polling).
-        next_due = next(
-            (parsing.departure_time_of(s) for s in candidates if not parsing.is_cancelled(s)), None
-        )
-        if next_due is None:
+        if self._next_due is None:
             seconds = self.slow_interval                       # nothing due at all
         else:
-            minutes_to_go = (next_due - dt_util.utcnow()).total_seconds() / 60
+            minutes_to_go = (self._next_due - dt_util.utcnow()).total_seconds() / 60
             if minutes_to_go < self.fast_window:
                 seconds = self.fast_interval                   # due soon (or already late)
             elif minutes_to_go < self.medium_window:
@@ -254,12 +297,9 @@ class RttCoordinator(DataUpdateCoordinator[RttData]):
             else:
                 seconds = self.slow_interval                   # nothing due for a while
 
-        fraction = self.client.status.lowest_fraction(SLOW_RATE_LIMIT_DIMENSIONS)
-        if fraction is not None and fraction < 0.05:
-            seconds = max(seconds, CRITICAL_SCAN_INTERVAL)
-        elif fraction is not None and fraction < 0.20:
-            seconds = max(seconds, LOW_BUDGET_SCAN_INTERVAL)
-        return timedelta(seconds=seconds)
+        wait = self._budget_wait()
+        self.budget_delay = max(0.0, wait - seconds)
+        return timedelta(seconds=max(seconds, wait))
 
     def _record_failure(self, state: str, err: Exception) -> None:
         self.client.status.state = state
